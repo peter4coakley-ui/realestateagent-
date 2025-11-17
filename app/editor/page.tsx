@@ -9,6 +9,10 @@ import FurnitureSidebar from '@/components/FurnitureSidebar';
 import MaskingTool from '@/components/MaskingTool';
 import PhotoStrip from '@/components/PhotoStrip';
 import EditHistory from '@/components/EditHistory';
+import LoadingOverlay from '@/components/LoadingOverlay';
+import EditOptionsModal from '@/components/EditOptionsModal';
+import { useEditQueue } from '@/hooks/useEditQueue';
+import { downloadImageWithWatermark } from '@/lib/watermark';
 
 interface Edit {
   id: string;
@@ -52,10 +56,34 @@ function EditorContent() {
   // Masking tool state
   const [maskingTool, setMaskingTool] = useState<'brush' | 'eraser'>('brush');
   const [brushSize, setBrushSize] = useState(20);
+  const [currentMask, setCurrentMask] = useState<string>('');
 
   // UI state
   const [showEditHistory, setShowEditHistory] = useState(false);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [showOptionsModal, setShowOptionsModal] = useState(false);
+  const [pendingToolType, setPendingToolType] = useState<ToolCategory | null>(null);
+  const [watermarkEnabled, setWatermarkEnabled] = useState(true);
+
+  // Edit queue hook
+  const {
+    isProcessing,
+    currentEdit,
+    queueLength,
+    addToQueue,
+  } = useEditQueue({
+    imageUrl: currentImageUrl,
+    brokerageId: 'demo-brokerage-123', // TODO: Get from auth
+    imageId: imageId || undefined,
+    listingId: listingId || undefined,
+    onEditComplete: (resultUrl, creditsUsed) => {
+      setCurrentImageUrl(resultUrl);
+      setCredits(prev => prev - creditsUsed);
+    },
+    onError: (error) => {
+      alert(`Edit failed: ${error}`);
+    },
+  });
 
   // Edit history management
   const addEdit = useCallback((type: string, description: string) => {
@@ -99,21 +127,58 @@ function EditorContent() {
     }
   }, []);
 
-  const handleDownload = useCallback(() => {
-    // TODO: Implement download with watermark option
-    alert('Download will be implemented with backend integration');
-  }, []);
+  const handleDownload = useCallback(async () => {
+    try {
+      await downloadImageWithWatermark(
+        currentImageUrl,
+        `edited-${Date.now()}.png`,
+        watermarkEnabled
+      );
+    } catch (error) {
+      alert('Download failed. Please try again.');
+      console.error('Download error:', error);
+    }
+  }, [currentImageUrl, watermarkEnabled]);
 
   const handleToolSelect = (tool: ToolCategory) => {
     setActiveTool(tool);
     
-    // Auto-add placeholder edit for demo
-    if (tool === 'flooring') {
-      setTimeout(() => addEdit('flooring', 'Changed floor to hardwood'), 1000);
+    // For tools that need options, show modal
+    if (tool === 'flooring' || tool === 'walls' || tool === 'exterior') {
+      setPendingToolType(tool);
+      setShowOptionsModal(true);
+    } else if (tool === 'remove' && !currentMask) {
+      alert('Please draw a mask first using the masking tool, then select remove objects.');
     }
   };
 
+  const handleApplyEdit = useCallback((parameters: Record<string, any>) => {
+    if (!pendingToolType) return;
+
+    const editType = pendingToolType;
+    const maskData = (editType === 'remove' || editType === 'masking') ? currentMask : undefined;
+
+    // Add to queue
+    addToQueue(editType, parameters, maskData);
+
+    // Add to history
+    addEdit(
+      editType,
+      `Applied ${editType} edit: ${JSON.stringify(parameters).substring(0, 50)}...`
+    );
+
+    // Clear pending
+    setPendingToolType(null);
+  }, [pendingToolType, currentMask, addToQueue]);
+
   const handleFurnitureSelect = (item: any) => {
+    // Add furniture to queue
+    addToQueue('furniture', {
+      item: item.name,
+      style: 'modern',
+    });
+
+    // Add to history
     addEdit('furniture', `Added ${item.name}`);
   };
 
@@ -128,8 +193,21 @@ function EditorContent() {
   };
 
   const handleClearMask = () => {
-    // TODO: Clear mask canvas
-    console.log('Clear mask');
+    setCurrentMask('');
+  };
+
+  const handleApplyMask = () => {
+    if (!currentMask) {
+      alert('Please draw a mask first');
+      return;
+    }
+
+    // When user finishes masking, they can apply removal
+    if (confirm('Apply object removal with this mask?')) {
+      addToQueue('remove', { preserveBackground: true }, currentMask);
+      addEdit('remove', 'Removed object with mask');
+      setCurrentMask('');
+    }
   };
 
   const canUndo = historyIndex >= 0;
@@ -177,6 +255,32 @@ function EditorContent() {
                   activeTool={maskingTool}
                   brushSize={brushSize}
                 />
+                <button
+                  onClick={handleApplyMask}
+                  className="mt-2 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Apply Mask & Remove Object
+                </button>
+              </div>
+            )}
+
+            {/* Loading overlay */}
+            {isProcessing && (
+              <LoadingOverlay
+                message={
+                  currentEdit
+                    ? `Applying ${currentEdit.editType} edit...`
+                    : 'Processing edit...'
+                }
+              />
+            )}
+
+            {/* Queue indicator */}
+            {queueLength > 0 && (
+              <div className="absolute top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg">
+                <p className="text-sm font-medium">
+                  {queueLength} {queueLength === 1 ? 'edit' : 'edits'} queued
+                </p>
               </div>
             )}
           </div>
@@ -231,6 +335,32 @@ function EditorContent() {
           {activeTool && ` • ${activeTool.charAt(0).toUpperCase() + activeTool.slice(1)} Tool`}
         </div>
       )}
+
+      {/* Edit Options Modal */}
+      {showOptionsModal && pendingToolType && (
+        <EditOptionsModal
+          isOpen={showOptionsModal}
+          onClose={() => {
+            setShowOptionsModal(false);
+            setPendingToolType(null);
+          }}
+          toolType={pendingToolType}
+          onSubmit={handleApplyEdit}
+        />
+      )}
+
+      {/* Watermark Toggle (moved to editor) */}
+      <div className="fixed bottom-4 right-24 lg:right-32 bg-white border rounded-lg shadow-lg px-3 py-2">
+        <label className="flex items-center gap-2 cursor-pointer text-sm">
+          <input
+            type="checkbox"
+            checked={watermarkEnabled}
+            onChange={(e) => setWatermarkEnabled(e.target.checked)}
+            className="rounded"
+          />
+          <span>Add watermark</span>
+        </label>
+      </div>
     </div>
   );
 }

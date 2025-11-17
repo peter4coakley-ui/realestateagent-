@@ -26,7 +26,9 @@ export class CreditSystem {
   async getBalance(brokerageId: string): Promise<number> {
     // TODO: Query database for credit balance
     console.log('Getting balance for:', brokerageId);
-    return 0;
+    
+    // Return mock balance for development
+    return 245;
   }
 
   async deductCredits(
@@ -34,9 +36,11 @@ export class CreditSystem {
     amount: number,
     metadata: Partial<CreditTransaction>
   ): Promise<boolean> {
-    // TODO: Deduct credits atomically
+    // TODO: Deduct credits atomically from database
     console.log('Deducting credits:', { brokerageId, amount, metadata });
-    return false;
+    
+    // Return true for development (mock success)
+    return true;
   }
 
   async addCredits(brokerageId: string, amount: number): Promise<boolean> {
