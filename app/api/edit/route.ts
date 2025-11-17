@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { nanoBanana, EditType } from '@/lib/nanoBanana';
-import { creditSystem } from '@/lib/creditSystem';
+import { hasCredits, deductCredits, getCreditCost } from '@/lib/creditSystem';
 
 export const maxDuration = 60; // Allow up to 60 seconds for AI processing
 
@@ -12,6 +12,7 @@ interface EditRequestBody {
   brokerageId: string; // For credit tracking
   listingId?: string;
   imageId?: string;
+  userId?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate edit type
-    const validEditTypes = ['flooring', 'walls', 'furniture', 'remove', 'masking', 'exterior'];
+    const validEditTypes: EditType[] = ['flooring', 'walls', 'furniture', 'remove', 'masking', 'exterior'];
     if (!validEditTypes.includes(body.editType)) {
       return NextResponse.json(
         { 
@@ -41,19 +42,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if brokerage has sufficient credits
-    const creditCost = creditSystem.getCreditCost(body.editType);
-    const currentBalance = await creditSystem.getBalance(body.brokerageId);
+    const operationType = body.editType;
+    const imageId = body.imageId || `img-${Date.now()}`;
+    const brokerageId = body.brokerageId;
 
-    if (currentBalance < creditCost) {
+    // Get credit cost for this operation
+    const creditCost = getCreditCost(operationType);
+
+    // Check if brokerage has sufficient credits
+    const hasSufficientCredits = await hasCredits(brokerageId, creditCost);
+
+    if (!hasSufficientCredits) {
       return NextResponse.json(
         { 
           success: false, 
           error: 'Insufficient credits',
-          creditsNeeded: creditCost,
-          currentBalance 
+          required: creditCost
         },
         { status: 402 }
+      );
+    }
+
+    // Deduct credits before processing
+    const deductResult = await deductCredits(brokerageId, operationType, {
+      imageId,
+      listingId: body.listingId,
+      userId: body.userId || 'anonymous',
+      description: `${operationType} edit on image ${imageId}`,
+    });
+
+    if (!deductResult.success) {
+      return NextResponse.json(
+        { success: false, error: 'Failed to deduct credits' },
+        { status: 500 }
       );
     }
 
@@ -66,6 +87,10 @@ export async function POST(request: NextRequest) {
     });
 
     if (!result.success) {
+      // Refund credits if edit failed
+      const { addCredits } = await import('@/lib/creditSystem');
+      await addCredits(brokerageId, creditCost, 'refund', `Refund for failed ${operationType} edit`);
+      
       return NextResponse.json(
         { 
           success: false, 
@@ -75,29 +100,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Deduct credits from brokerage
-    const creditDeducted = await creditSystem.deductCredits(
-      body.brokerageId,
-      result.creditsUsed,
-      {
-        imageId: body.imageId || '',
-        editType: body.editType,
-        timestamp: new Date(),
-      }
-    );
-
-    if (!creditDeducted) {
-      console.error('Failed to deduct credits, but edit was successful');
-      // Continue anyway - this is a non-critical error
-    }
-
-    // Return successful result
     return NextResponse.json({
       success: true,
-      resultUrl: result.resultUrl,
-      creditsUsed: result.creditsUsed,
-      processingTime: result.processingTime,
-      remainingCredits: currentBalance - result.creditsUsed,
+      data: {
+        resultUrl: result.resultUrl,
+        processingTime: result.processingTime,
+        creditsUsed: creditCost,
+        remainingCredits: deductResult.newBalance,
+        transaction: deductResult.transaction,
+      },
     });
 
   } catch (error: any) {
@@ -106,29 +117,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { 
         success: false, 
-        error: error.message || 'Internal server error during edit operation' 
+        error: error.message || 'Internal server error' 
       },
       { status: 500 }
     );
   }
-}
-
-// GET endpoint for checking edit status (if needed for long-running operations)
-export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams;
-  const editId = searchParams.get('editId');
-
-  if (!editId) {
-    return NextResponse.json(
-      { success: false, error: 'Missing editId parameter' },
-      { status: 400 }
-    );
-  }
-
-  // TODO: Implement edit status checking for async operations
-  return NextResponse.json({
-    success: true,
-    status: 'completed',
-    message: 'Edit status checking not yet implemented',
-  });
 }

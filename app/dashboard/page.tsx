@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import ListingCard from '@/components/ListingCard';
+import CreditsOverview from '@/components/CreditsOverview';
 
 export default function DashboardPage() {
   // Placeholder data - will be replaced with real data from API
@@ -89,6 +90,15 @@ export default function DashboardPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Credits Overview */}
+        <div className="mb-8">
+          <CreditsOverview 
+            brokerageId="demo-brokerage"
+            showDetails={true}
+            onPurchaseClick={() => alert('Navigate to purchase credits page')}
+          />
+        </div>
+
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           {/* Credits Widget */}
