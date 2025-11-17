@@ -11,6 +11,7 @@ import PhotoStrip from '@/components/PhotoStrip';
 import EditHistory from '@/components/EditHistory';
 import LoadingOverlay from '@/components/LoadingOverlay';
 import EditOptionsModal from '@/components/EditOptionsModal';
+import ChatEditor from '@/components/ChatEditor';
 import { useEditQueue } from '@/hooks/useEditQueue';
 import { downloadImageWithWatermark } from '@/lib/watermark';
 
@@ -60,6 +61,7 @@ function EditorContent() {
 
   // UI state
   const [showEditHistory, setShowEditHistory] = useState(false);
+  const [showChatEditor, setShowChatEditor] = useState(true);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [pendingToolType, setPendingToolType] = useState<ToolCategory | null>(null);
@@ -170,6 +172,16 @@ function EditorContent() {
     // Clear pending
     setPendingToolType(null);
   }, [pendingToolType, currentMask, addToQueue]);
+
+  // Handle edits from chat
+  const handleChatEdit = useCallback((editType: string, parameters: Record<string, any>, maskData?: string) => {
+    // Add to queue
+    addToQueue(editType as any, parameters, maskData);
+
+    // Add to history
+    const description = `Chat: ${editType} - ${JSON.stringify(parameters).substring(0, 40)}...`;
+    addEdit(editType, description);
+  }, [addToQueue]);
 
   const handleFurnitureSelect = (item: any) => {
     // Add furniture to queue
@@ -292,41 +304,89 @@ function EditorContent() {
         </div>
 
         {/* Right Sidebar - Conditional */}
-        {activeTool === 'furniture' && (
+        {activeTool === 'furniture' && !showChatEditor && (
           <FurnitureSidebar
             onSelectItem={handleFurnitureSelect}
             isVisible={true}
           />
         )}
 
+        {/* Chat Editor Sidebar */}
+        {showChatEditor && (
+          <div className="w-96 lg:w-[28rem] bg-white border-l flex flex-col">
+            <ChatEditor
+              imageUrl={currentImageUrl}
+              onApplyEdit={handleChatEdit}
+              isProcessing={isProcessing}
+            />
+          </div>
+        )}
+
         {/* Edit History Sidebar - Toggle */}
-        {showEditHistory && (
+        {showEditHistory && !showChatEditor && (
           <div className="w-80 bg-white border-l">
             <EditHistory />
           </div>
         )}
       </div>
 
-      {/* Floating Edit History Toggle (Mobile & Desktop) */}
-      <button
-        onClick={() => setShowEditHistory(!showEditHistory)}
-        className="fixed bottom-6 right-6 lg:bottom-8 lg:right-8 p-4 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-all z-50 group"
-        title="Edit History"
-      >
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-        {history.length > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-bold">
-            {history.length}
-          </span>
-        )}
-      </button>
+      {/* Floating Sidebar Toggles */}
+      <div className="fixed bottom-6 right-6 lg:bottom-8 lg:right-8 flex flex-col gap-3 z-50">
+        {/* Chat Toggle */}
+        <button
+          onClick={() => {
+            setShowChatEditor(!showChatEditor);
+            if (!showChatEditor) {
+              setShowEditHistory(false);
+            }
+          }}
+          className={`p-4 rounded-full shadow-lg transition-all ${
+            showChatEditor 
+              ? 'bg-blue-600 text-white hover:bg-blue-700' 
+              : 'bg-white text-gray-600 border-2 border-gray-300 hover:border-blue-500'
+          }`}
+          title="AI Chat Editor"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+            />
+          </svg>
+        </button>
+
+        {/* History Toggle */}
+        <button
+          onClick={() => {
+            setShowEditHistory(!showEditHistory);
+            if (!showEditHistory) {
+              setShowChatEditor(false);
+            }
+          }}
+          className={`p-4 rounded-full shadow-lg transition-all ${
+            showEditHistory 
+              ? 'bg-blue-600 text-white hover:bg-blue-700' 
+              : 'bg-white text-gray-600 border-2 border-gray-300 hover:border-gray-400'
+          }`}
+          title="Edit History"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          {history.length > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-bold">
+              {history.length}
+            </span>
+          )}
+        </button>
+      </div>
 
       {/* Status Bar (optional info) */}
       {imageDimensions && (
