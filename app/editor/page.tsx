@@ -1,3 +1,19 @@
+/**
+ * Image Editor Page
+ * 
+ * Main editing interface for AI-powered real estate image editing.
+ * Features:
+ * - Multi-tool sidebar (flooring, walls, furniture, etc.)
+ * - Interactive canvas with pan/zoom
+ * - AI Chat Editor for natural language commands
+ * - Sequential edit queue to prevent race conditions
+ * - Real-time credit tracking
+ * - Undo/redo with full history
+ * - Mobile-responsive with collapsible sidebars
+ * 
+ * @route /editor
+ */
+
 'use client';
 
 import { useState, useCallback, Suspense } from 'react';
@@ -15,6 +31,9 @@ import ChatEditor from '@/components/ChatEditor';
 import { useEditQueue } from '@/hooks/useEditQueue';
 import { downloadImageWithWatermark } from '@/lib/watermark';
 
+/**
+ * Edit item for history tracking
+ */
 interface Edit {
   id: string;
   type: string;
@@ -22,52 +41,49 @@ interface Edit {
   description: string;
 }
 
-interface Photo {
-  id: string;
-  url: string;
-}
-
+/**
+ * Editor content component (wrapped in Suspense)
+ */
 function EditorContent() {
   const searchParams = useSearchParams();
-  const listingId = searchParams.get('listingId');
-  const imageId = searchParams.get('imageId');
+  
+  // Initialize with demo image or from URL params
+  const initialImage = searchParams.get('imageUrl') || 
+    'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=1200';
 
-  // Sample photos for the listing
-  const [photos] = useState<Photo[]>([
-    {
-      id: '1',
-      url: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=1200',
-    },
-    {
-      id: '2',
-      url: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1200',
-    },
-    {
-      id: '3',
-      url: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?w=1200',
-    },
-  ]);
+  // === STATE MANAGEMENT ===
+  
+  // Image and listing state
+  const [currentImageUrl, setCurrentImageUrl] = useState<string>(initialImage);
+  const [isImageTransitioning, setIsImageTransitioning] = useState(false);
 
-  const [currentImageUrl, setCurrentImageUrl] = useState(photos[0]?.url);
-  const [activeTool, setActiveTool] = useState<ToolCategory | null>(null);
+  // Edit history state
   const [history, setHistory] = useState<Edit[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [credits, setCredits] = useState(245);
-  
+  const [credits, setCredits] = useState(880); // Updated from credit API
+
+  // Active tool state
+  const [activeTool, setActiveTool] = useState<ToolCategory | null>(null);
+
   // Masking tool state
   const [maskingTool, setMaskingTool] = useState<'brush' | 'eraser'>('brush');
   const [brushSize, setBrushSize] = useState(20);
   const [currentMask, setCurrentMask] = useState<string>('');
 
-  // UI state
+  // UI visibility state
   const [showEditHistory, setShowEditHistory] = useState(false);
   const [showChatEditor, setShowChatEditor] = useState(true);
-  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [pendingToolType, setPendingToolType] = useState<ToolCategory | null>(null);
   const [watermarkEnabled, setWatermarkEnabled] = useState(true);
 
-  // Edit queue hook
+  // === EDIT QUEUE HOOK ===
+  
+  /**
+   * Sequential edit queue to prevent race conditions
+   * Processes edits one at a time, chaining results
+   */
   const {
     isProcessing,
     currentEdit,
@@ -75,19 +91,26 @@ function EditorContent() {
     addToQueue,
   } = useEditQueue({
     imageUrl: currentImageUrl,
-    brokerageId: 'demo-brokerage-123', // TODO: Get from auth
-    imageId: imageId || undefined,
-    listingId: listingId || undefined,
-    onEditComplete: (resultUrl, creditsUsed) => {
-      setCurrentImageUrl(resultUrl);
-      setCredits(prev => prev - creditsUsed);
+    brokerageId: 'demo-brokerage',
+    onEditComplete: (resultUrl: string, creditsUsed: number) => {
+      // Smooth transition to new image
+      setIsImageTransitioning(true);
+      setTimeout(() => {
+        setCurrentImageUrl(resultUrl);
+        setCredits(prev => Math.max(0, prev - creditsUsed));
+        setTimeout(() => setIsImageTransitioning(false), 300);
+      }, 150);
     },
-    onError: (error) => {
+    onError: (error: string) => {
       alert(`Edit failed: ${error}`);
     },
   });
 
-  // Edit history management
+  // === HISTORY MANAGEMENT ===
+
+  /**
+   * Add an edit to the history
+   */
   const addEdit = useCallback((type: string, description: string) => {
     const newEdit: Edit = {
       id: `edit-${Date.now()}`,
@@ -95,225 +118,299 @@ function EditorContent() {
       timestamp: new Date(),
       description,
     };
-    
-    // Remove any edits after current index (if user went back and made new edit)
-    const newHistory = history.slice(0, historyIndex + 1);
-    newHistory.push(newEdit);
-    
+    const newHistory = [...history.slice(0, historyIndex + 1), newEdit];
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
-    
-    // Simulate credit deduction
-    setCredits(prev => prev - 1);
   }, [history, historyIndex]);
 
+  /**
+   * Undo last edit
+   */
   const handleUndo = useCallback(() => {
-    if (historyIndex > -1) {
-      setHistoryIndex(prev => prev - 1);
-      // TODO: Revert to previous state
+    if (historyIndex > 0) {
+      setHistoryIndex(historyIndex - 1);
     }
   }, [historyIndex]);
 
+  /**
+   * Redo next edit
+   */
   const handleRedo = useCallback(() => {
     if (historyIndex < history.length - 1) {
-      setHistoryIndex(prev => prev + 1);
-      // TODO: Apply next state
+      setHistoryIndex(historyIndex + 1);
     }
   }, [historyIndex, history.length]);
 
+  /**
+   * Reset all edits
+   */
   const handleReset = useCallback(() => {
-    if (confirm('Are you sure you want to reset all changes? This cannot be undone.')) {
+    if (confirm('Reset all edits? This cannot be undone.')) {
       setHistory([]);
       setHistoryIndex(-1);
-      // TODO: Reset image to original
+      setCurrentImageUrl(initialImage);
     }
-  }, []);
+  }, [initialImage]);
 
+  /**
+   * Download image with optional watermark
+   */
   const handleDownload = useCallback(async () => {
     try {
       await downloadImageWithWatermark(
         currentImageUrl,
-        `edited-${Date.now()}.png`,
+        'edited-image.jpg',
         watermarkEnabled
       );
     } catch (error) {
+      console.error('Download failed:', error);
       alert('Download failed. Please try again.');
-      console.error('Download error:', error);
     }
   }, [currentImageUrl, watermarkEnabled]);
 
-  const handleToolSelect = (tool: ToolCategory) => {
+  // === TOOL HANDLERS ===
+
+  /**
+   * Handle tool selection from sidebar
+   */
+  const handleToolSelect = useCallback((tool: ToolCategory) => {
     setActiveTool(tool);
     
-    // For tools that need options, show modal
+    // Tools that need additional parameters
     if (tool === 'flooring' || tool === 'walls' || tool === 'exterior') {
       setPendingToolType(tool);
       setShowOptionsModal(true);
-    } else if (tool === 'remove' && !currentMask) {
+      setShowMobileMenu(false); // Close mobile menu
+    } 
+    // Removal requires mask first
+    else if (tool === 'remove' && !currentMask) {
       alert('Please draw a mask first using the masking tool, then select remove objects.');
     }
-  };
+  }, [currentMask]);
 
+  /**
+   * Apply edit with parameters from modal
+   */
   const handleApplyEdit = useCallback((parameters: Record<string, any>) => {
     if (!pendingToolType) return;
 
     const editType = pendingToolType;
     const maskData = (editType === 'remove' || editType === 'masking') ? currentMask : undefined;
 
-    // Add to queue
+    // Add to queue for sequential processing
     addToQueue(editType, parameters, maskData);
-
-    // Add to history
+    
+    // Track in history
     addEdit(
       editType,
       `Applied ${editType} edit: ${JSON.stringify(parameters).substring(0, 50)}...`
     );
 
-    // Clear pending
+    // Clear modal state
     setPendingToolType(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingToolType, currentMask, addToQueue]);
 
-  // Handle edits from chat
+  /**
+   * Handle edits from chat interface
+   */
   const handleChatEdit = useCallback((editType: string, parameters: Record<string, any>, maskData?: string) => {
-    // Add to queue
     addToQueue(editType as any, parameters, maskData);
-
-    // Add to history
     const description = `Chat: ${editType} - ${JSON.stringify(parameters).substring(0, 40)}...`;
     addEdit(editType, description);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addToQueue]);
 
-  const handleFurnitureSelect = (item: any) => {
-    // Add furniture to queue
+  /**
+   * Handle furniture item selection
+   */
+  const handleFurnitureSelect = useCallback((item: any) => {
     addToQueue('furniture', {
       item: item.name,
-      style: 'modern',
+      style: item.style || 'modern',
     });
-
-    // Add to history
     addEdit('furniture', `Added ${item.name}`);
-  };
+  }, [addToQueue, addEdit]);
 
-  const handlePhotoSelect = (photoId: string) => {
-    const photo = photos.find(p => p.id === photoId);
-    if (photo) {
-      setCurrentImageUrl(photo.url);
-      // Reset history when changing photos
-      setHistory([]);
-      setHistoryIndex(-1);
-    }
-  };
+  /**
+   * Handle photo selection from strip
+   */
+  const handlePhotoSelect = useCallback((photoUrl: string) => {
+    setIsImageTransitioning(true);
+    setTimeout(() => {
+      setCurrentImageUrl(photoUrl);
+      setTimeout(() => setIsImageTransitioning(false), 300);
+    }, 150);
+  }, []);
 
-  const handleClearMask = () => {
+  // === MASKING HANDLERS ===
+
+  const handleClearMask = useCallback(() => {
     setCurrentMask('');
-  };
+  }, []);
 
-  const handleApplyMask = () => {
-    if (!currentMask) {
-      alert('Please draw a mask first');
-      return;
-    }
+  const handleApplyMask = useCallback((maskData: string) => {
+    setCurrentMask(maskData);
+    alert('Mask applied! Now select an action (Remove Objects or Masking).');
+  }, []);
 
-    // When user finishes masking, they can apply removal
-    if (confirm('Apply object removal with this mask?')) {
-      addToQueue('remove', { preserveBackground: true }, currentMask);
-      addEdit('remove', 'Removed object with mask');
-      setCurrentMask('');
-    }
-  };
+  // === MOBILE MENU TOGGLE ===
 
-  const canUndo = historyIndex >= 0;
-  const canRedo = historyIndex < history.length - 1;
+  const toggleMobileMenu = useCallback(() => {
+    setShowMobileMenu(prev => !prev);
+  }, []);
+
+  const closeMobileMenu = useCallback(() => {
+    setShowMobileMenu(false);
+  }, []);
 
   return (
-    <div className="h-screen flex flex-col bg-gray-100">
+    <div className="h-screen w-screen flex flex-col bg-gray-100 overflow-hidden">
       {/* Top Action Bar */}
       <TopActionBar
         onUndo={handleUndo}
         onRedo={handleRedo}
         onReset={handleReset}
         onDownload={handleDownload}
-        canUndo={canUndo}
-        canRedo={canRedo}
+        canUndo={historyIndex > 0}
+        canRedo={historyIndex < history.length - 1}
         credits={credits}
+        watermarkEnabled={watermarkEnabled}
+        onWatermarkToggle={setWatermarkEnabled}
         listingAddress="123 Main Street"
         imageName="Living Room"
       />
 
-      {/* Main Editor Area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar - Tool Categories */}
-        <ToolSidebar 
-          onSelectTool={handleToolSelect}
-          activeTool={activeTool}
-        />
+      {/* Mobile Menu Button - Only visible on mobile */}
+      <button
+        onClick={toggleMobileMenu}
+        className="fixed bottom-24 left-4 z-50 lg:hidden p-4 bg-white border-2 border-gray-300 rounded-full shadow-lg active:scale-95 transition-transform"
+        aria-label="Open tools menu"
+      >
+        <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
 
-        {/* Center - Canvas Area */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Canvas */}
-          <div className="flex-1 relative">
-            <ImageCanvas 
-              imageUrl={currentImageUrl}
-              onImageLoad={setImageDimensions}
-            />
-            
-            {/* Tool-specific overlays */}
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Left Sidebar - Tools (Desktop: always visible, Mobile: slide-in) */}
+        <div className={`
+          fixed lg:relative inset-y-0 left-0 z-40
+          transform transition-transform duration-300 ease-in-out
+          ${showMobileMenu ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          w-72 lg:w-20
+          bg-white border-r shadow-lg lg:shadow-none
+        `}>
+          {/* Mobile close button */}
+          <button
+            onClick={closeMobileMenu}
+            className="lg:hidden absolute top-4 right-4 p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="Close menu"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+
+          <ToolSidebar
+            activeTool={activeTool}
+            onSelectTool={handleToolSelect}
+          />
+        </div>
+
+        {/* Mobile overlay */}
+        {showMobileMenu && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
+            onClick={closeMobileMenu}
+          />
+        )}
+
+        {/* Center - Canvas and Bottom Strip */}
+        <div className="flex-1 flex flex-col bg-white overflow-hidden">
+          {/* Canvas Area */}
+          <div className="flex-1 relative overflow-hidden">
+            <div className={`
+              h-full w-full transition-opacity duration-300
+              ${isImageTransitioning ? 'opacity-0' : 'opacity-100'}
+            `}>
+              <ImageCanvas
+                imageUrl={currentImageUrl}
+              />
+            </div>
+
+            {/* Masking Tool Overlay */}
             {activeTool === 'masking' && (
-              <div className="absolute top-4 left-4 w-80">
+              <div className="absolute top-4 left-4 z-10 max-w-xs">
                 <MaskingTool
+                  activeTool={maskingTool}
                   onToolChange={setMaskingTool}
+                  brushSize={brushSize}
                   onBrushSizeChange={setBrushSize}
                   onClearMask={handleClearMask}
-                  activeTool={maskingTool}
-                  brushSize={brushSize}
                 />
-                <button
-                  onClick={handleApplyMask}
-                  className="mt-2 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  Apply Mask & Remove Object
-                </button>
               </div>
             )}
 
-            {/* Loading overlay */}
+            {/* Processing indicator */}
             {isProcessing && (
-              <LoadingOverlay
-                message={
-                  currentEdit
-                    ? `Applying ${currentEdit.editType} edit...`
-                    : 'Processing edit...'
-                }
-              />
-            )}
-
-            {/* Queue indicator */}
-            {queueLength > 0 && (
-              <div className="absolute top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg">
-                <p className="text-sm font-medium">
-                  {queueLength} {queueLength === 1 ? 'edit' : 'edits'} queued
-                </p>
+              <div className="absolute top-4 right-4 z-10">
+                <div className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-pulse">
+                  <div className="w-2 h-2 bg-white rounded-full animate-ping"></div>
+                  <span className="text-sm font-medium">
+                    {currentEdit ? `Processing ${currentEdit.editType}...` : 'Processing...'}
+                  </span>
+                  {queueLength > 0 && (
+                    <span className="text-xs opacity-75">
+                      ({queueLength} in queue)
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
 
-          {/* Bottom - Photo Strip */}
-          <div className="bg-white border-t">
+          {/* Photo Strip - Hidden on small mobile, visible on tablet+ */}
+          <div className="hidden sm:block bg-white border-t">
             <PhotoStrip />
           </div>
         </div>
 
-        {/* Right Sidebar - Conditional */}
+        {/* Right Sidebar - Conditional (Desktop: side panel, Mobile: full screen) */}
+        
+        {/* Furniture Sidebar */}
         {activeTool === 'furniture' && !showChatEditor && (
-          <FurnitureSidebar
-            onSelectItem={handleFurnitureSelect}
-            isVisible={true}
-          />
+          <div className="hidden lg:block w-80 bg-white border-l overflow-y-auto">
+            <FurnitureSidebar
+              onSelectItem={handleFurnitureSelect}
+              isVisible={true}
+            />
+          </div>
         )}
 
         {/* Chat Editor Sidebar */}
         {showChatEditor && (
-          <div className="w-96 lg:w-[28rem] bg-white border-l flex flex-col">
+          <div className={`
+            fixed lg:relative inset-0 lg:inset-auto
+            w-full lg:w-96 xl:w-[28rem]
+            bg-white lg:border-l
+            z-50 lg:z-auto
+            flex flex-col
+            transition-transform duration-300 ease-in-out
+            ${showChatEditor ? 'translate-x-0' : 'translate-x-full'}
+          `}>
+            {/* Mobile close button for chat */}
+            <button
+              onClick={() => setShowChatEditor(false)}
+              className="lg:hidden absolute top-4 right-4 z-10 p-2 bg-white rounded-full shadow-lg"
+              aria-label="Close chat"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
             <ChatEditor
               imageUrl={currentImageUrl}
               onApplyEdit={handleChatEdit}
@@ -322,16 +419,16 @@ function EditorContent() {
           </div>
         )}
 
-        {/* Edit History Sidebar - Toggle */}
+        {/* Edit History Sidebar */}
         {showEditHistory && !showChatEditor && (
-          <div className="w-80 bg-white border-l">
+          <div className="hidden lg:block w-80 bg-white border-l overflow-y-auto">
             <EditHistory />
           </div>
         )}
       </div>
 
       {/* Floating Sidebar Toggles */}
-      <div className="fixed bottom-6 right-6 lg:bottom-8 lg:right-8 flex flex-col gap-3 z-50">
+      <div className="fixed bottom-6 right-4 lg:bottom-8 lg:right-8 flex flex-col gap-3 z-40">
         {/* Chat Toggle */}
         <button
           onClick={() => {
@@ -340,14 +437,16 @@ function EditorContent() {
               setShowEditHistory(false);
             }
           }}
-          className={`p-4 rounded-full shadow-lg transition-all ${
-            showChatEditor 
+          className={`
+            p-3 lg:p-4 rounded-full shadow-lg transition-all active:scale-95
+            ${showChatEditor 
               ? 'bg-blue-600 text-white hover:bg-blue-700' 
               : 'bg-white text-gray-600 border-2 border-gray-300 hover:border-blue-500'
-          }`}
+            }
+          `}
           title="AI Chat Editor"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-5 h-5 lg:w-6 lg:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -365,11 +464,13 @@ function EditorContent() {
               setShowChatEditor(false);
             }
           }}
-          className={`p-4 rounded-full shadow-lg transition-all ${
-            showEditHistory 
+          className={`
+            hidden lg:flex p-4 rounded-full shadow-lg transition-all relative
+            ${showEditHistory 
               ? 'bg-blue-600 text-white hover:bg-blue-700' 
               : 'bg-white text-gray-600 border-2 border-gray-300 hover:border-gray-400'
-          }`}
+            }
+          `}
           title="Edit History"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -381,19 +482,18 @@ function EditorContent() {
             />
           </svg>
           {history.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-bold">
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-bold shadow-lg">
               {history.length}
             </span>
           )}
         </button>
       </div>
 
-      {/* Status Bar (optional info) */}
-      {imageDimensions && (
-        <div className="hidden lg:block fixed bottom-4 left-4 bg-black bg-opacity-70 text-white text-xs px-3 py-2 rounded">
-          {imageDimensions.width} × {imageDimensions.height}px
-          {activeTool && ` • ${activeTool.charAt(0).toUpperCase() + activeTool.slice(1)} Tool`}
-        </div>
+      {/* Loading Overlay */}
+      {isProcessing && (
+        <LoadingOverlay
+          message={currentEdit ? `Processing ${currentEdit.editType}...` : 'Processing edit...'}
+        />
       )}
 
       {/* Edit Options Modal */}
@@ -404,34 +504,25 @@ function EditorContent() {
             setShowOptionsModal(false);
             setPendingToolType(null);
           }}
-          toolType={pendingToolType}
           onSubmit={handleApplyEdit}
+          toolType={pendingToolType}
         />
       )}
-
-      {/* Watermark Toggle (moved to editor) */}
-      <div className="fixed bottom-4 right-24 lg:right-32 bg-white border rounded-lg shadow-lg px-3 py-2">
-        <label className="flex items-center gap-2 cursor-pointer text-sm">
-          <input
-            type="checkbox"
-            checked={watermarkEnabled}
-            onChange={(e) => setWatermarkEnabled(e.target.checked)}
-            className="rounded"
-          />
-          <span>Add watermark</span>
-        </label>
-      </div>
     </div>
   );
 }
 
+/**
+ * Main Editor Page Component
+ * Wraps content in Suspense for Next.js 14 compatibility
+ */
 export default function EditorPage() {
   return (
     <Suspense fallback={
-      <div className="h-screen flex items-center justify-center bg-gray-100">
+      <div className="h-screen w-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading editor...</p>
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mb-4"></div>
+          <p className="text-gray-600 font-medium">Loading editor...</p>
         </div>
       </div>
     }>

@@ -1,5 +1,14 @@
 /**
- * Watermark utility for adding "AI Enhanced" watermark to images
+ * Watermark Utility
+ * 
+ * Adds customizable watermarks to images using HTML5 Canvas API.
+ * Used for branding downloaded edited images.
+ * 
+ * Features:
+ * - Customizable text, position, and styling
+ * - Semi-transparent background
+ * - High-quality PNG output
+ * - Browser-compatible (no server-side processing)
  */
 
 export interface WatermarkOptions {
@@ -11,6 +20,20 @@ export interface WatermarkOptions {
   color?: string;
 }
 
+/**
+ * Add watermark to an image
+ * 
+ * @param imageUrl - URL or data URI of the image to watermark
+ * @param options - Watermark configuration options
+ * @returns Promise<string> - Data URI of the watermarked image
+ * 
+ * @example
+ * const watermarkedUrl = await addWatermark(imageUrl, {
+ *   text: 'AI Enhanced',
+ *   position: 'bottom-right',
+ *   opacity: 0.5
+ * });
+ */
 export async function addWatermark(
   imageUrl: string,
   options: WatermarkOptions = {}
@@ -113,6 +136,23 @@ export async function addWatermark(
   });
 }
 
+/**
+ * Download image with optional watermark
+ * 
+ * Triggers a browser download of the image, optionally adding
+ * a watermark before download.
+ * 
+ * @param imageUrl - URL or data URI of the image
+ * @param filename - Desired filename for download
+ * @param addWatermarkFlag - Whether to add watermark before download
+ * 
+ * @example
+ * await downloadImageWithWatermark(
+ *   currentImageUrl,
+ *   'my-edited-photo.jpg',
+ *   true
+ * );
+ */
 export async function downloadImageWithWatermark(
   imageUrl: string,
   filename: string = 'edited-image.png',
