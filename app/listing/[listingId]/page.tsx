@@ -51,6 +51,8 @@ export default function ListingPage({ params }: { params: { listingId: string } 
 
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [isGeneratingLink, setIsGeneratingLink] = useState(false);
+  const [shareLink, setShareLink] = useState<string | null>(null);
 
   const handleFilesSelected = async (files: File[]) => {
     setIsUploading(true);
@@ -87,11 +89,35 @@ export default function ListingPage({ params }: { params: { listingId: string } 
     setPhotos((prev) => prev.filter((photo) => photo.id !== photoId));
   };
 
-  const handleGenerateShareLink = () => {
-    // TODO: Implement share link generation
-    const shareUrl = `${window.location.origin}/edit-access/example-token-${listingId}`;
-    navigator.clipboard.writeText(shareUrl);
-    alert('Share link copied to clipboard!\n\n' + shareUrl);
+  const handleGenerateShareLink = async () => {
+    setIsGeneratingLink(true);
+    try {
+      const response = await fetch('/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          listingId,
+          brokerageId: 'demo-brokerage',
+          agentId: 'demo-agent',
+          expiresInDays: 7,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setShareLink(data.data.url);
+        navigator.clipboard.writeText(data.data.url);
+        alert(`Share link created and copied to clipboard!\n\nExpires: ${data.data.expiresIn}\n\nLink: ${data.data.url}`);
+      } else {
+        alert(`Failed to create share link: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Share link error:', error);
+      alert('Failed to create share link. Please try again.');
+    } finally {
+      setIsGeneratingLink(false);
+    }
   };
 
   return (
@@ -130,22 +156,34 @@ export default function ListingPage({ params }: { params: { listingId: string } 
             <div className="flex items-center gap-2">
               <button
                 onClick={handleGenerateShareLink}
-                className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2"
+                disabled={isGeneratingLink}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"
-                  />
-                </svg>
-                Share with Buyer
+                {isGeneratingLink ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"
+                      />
+                    </svg>
+                    Share with Buyer
+                  </>
+                )}
               </button>
               <select className="px-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="active">Active</option>
